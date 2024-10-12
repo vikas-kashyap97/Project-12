@@ -1,245 +1,93 @@
-const port = 4000;
-const express = require("express");
+const express = require('express');
+const cors = require('cors');
+const mongoose = require('mongoose');
+const multer = require('multer');
+const path = require('path');
+
 const app = express();
-const mongoose = require("mongoose");
-const jwt = require("jsonwebtoken");
-const multer = require("multer");
-const path = require("path");
-const cors = require("cors");
-const fs = require('fs');
+const PORT = process.env.PORT || 4000;
 
-// Ensure the 'upload/images' directory exists
-const uploadDir = './upload/images';
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
+// Middleware
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:5173']
+}));
 app.use(express.json());
-app.use(cors());
 
-// Database Connection with MongoDB
-mongoose.connect("mongodb+srv://rashika1319:Rashika1234@cluster0.dahh5.mongodb.net/e-commerce", {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-})
-.then(() => console.log("Connected to MongoDB"))
-.catch(err => console.error("MongoDB connection error:", err));
-
-// API for basic status check
-app.get("/", (req, res) => {
-    res.send("Express App is Running");
+// Connect to MongoDB (replace with your actual connection string)
+mongoose.connect('mongodb://localhost/your_database_name', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
 });
 
-// Image Storage Engine
+// Define Product Schema
+const productSchema = new mongoose.Schema({
+  name: String,
+  image: String,
+  category: String,
+  new_price: Number,
+  old_price: Number,
+  isNewCollection: { type: Boolean, default: true }
+});
+
+const Product = mongoose.model('Product', productSchema);
+
+// Set up multer for file uploads
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, './upload/images');
-    },
-    filename: (req, file, cb) => {
-        cb(null, `${file.fieldname}_${Date.now()}${path.extname(file.originalname)}`);
-    }
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
 });
 
 const upload = multer({ storage: storage });
 
-// Creating upload endpoint for images
-app.use('/images', express.static('upload/images'));
+// Routes
+app.post('/api/products', upload.single('image'), async (req, res) => {
+  try {
+    const { name, description, price, category } = req.body;
+    const image = req.file ? `/uploads/${req.file.filename}` : '';
 
-app.post("/upload", upload.single('product'), (req, res) => {
-    res.json({
-        success: 1,
-        image_url: `http://localhost:${port}/images/${req.file.filename}`
+    const newProduct = new Product({
+      name,
+      description,
+      price,
+      category,
+      image,
+      isNewCollection: true, // Set this to true for new products
     });
+
+    await newProduct.save();
+    res.status(201).json(newProduct);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
 });
 
-// Schema for creating Products
-const ProductSchema = new mongoose.Schema({
-    id: {
-        type: Number,
-        required: true,
-    },
-    name: {
-        type: String,
-        required: true,
-    },
-    image: {
-        type: String,
-        required: true,
-    },
-    category: {
-        type: String,
-        required: true,
-    },
-    new_price: {
-        type: Number,
-        required: true,
-    },
-    old_price: {
-        type: Number,
-        required: true,
-    },
-    date: {
-        type: Date,
-        default: Date.now,
-    },
-    available: {
-        type: Boolean,
-        default: true,
-    },
+app.get('/api/products', async (req, res) => {
+  try {
+    const products = await Product.find();
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 });
 
-const Product = mongoose.model("Product", ProductSchema);
-
-// API for adding a new product
-app.post('/addproduct', async (req, res) => {
-    try {
-        let products = await Product.find({});
-        let id = products.length > 0 ? products[products.length - 1].id + 1 : 1;
-
-        const product = new Product({
-            id,
-            name: req.body.name,
-            image: req.body.image,
-            category: req.body.category,
-            new_price: req.body.new_price,
-            old_price: req.body.old_price
-        });
-
-        await product.save();
-        res.json({
-            success: true,
-            name: req.body.name,
-        });
-    } catch (error) {
-        console.error("Error adding product:", error);
-        res.status(500).json({ success: false, message: "Server error" });
-    }
+// Add a new route to fetch new collections
+app.get('/api/newcollections', async (req, res) => {
+  try {
+    const newCollections = await Product.find({ isNewCollection: true });
+    res.json(newCollections);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 });
 
-// API for deleting a product
-app.post('/removeproduct', async (req, res) => {
-    try {
-        await Product.findOneAndDelete({ id: req.body.id });
-        console.log("Product Removed");
-        res.json({
-            success: true,
-            name: req.body.name
-        });
-    } catch (error) {
-        console.error("Error removing product:", error);
-        res.status(500).json({ success: false, message: "Server error" });
-    }
-});
+// Serve uploaded files
+app.use('/uploads', express.static('uploads'));
 
-// API for getting all products
-app.get('/allproducts', async (req, res) => {
-    try {
-        let products = await Product.find({});
-        console.log("All Products Fetched");
-        res.send(products);
-    } catch (error) {
-        console.error("Error fetching products:", error);
-        res.status(500).json({ success: false, message: "Server error" });
-    }
-});
-
-// Schema for Users
-const Users = mongoose.model('Users', {
-    name: {
-        type: String,
-    },
-    email: {
-        type: String,
-        unique: true,
-    },
-    password: {
-        type: String,
-    },
-    cartData: {
-        type: Object,
-    },
-    date: {
-        type: Date,
-        default: Date.now,
-    }
-});
-
-// Endpoint for registering a user (corrected URL)
-app.post('/signup', async (req, res) => {
-    try {
-        let check = await Users.findOne({ email: req.body.email });
-        if (check) {
-            return res.status(400).json({ success: false, errors: "Existing user found with the same email address" });
-        }
-
-        let cart = {};
-        for (let i = 0; i < 300; i++) {
-            cart[i] = 0;
-        }
-
-        const user = new Users({
-            name: req.body.username,
-            email: req.body.email,
-            password: req.body.password,
-            cartData: cart,
-        });
-        await user.save();
-
-        const data = {
-            user: {
-                id: user.id
-            }
-        };
-
-        const token = jwt.sign(data, 'secret_ecom');
-        res.json({ success: true, token });
-
-    } catch (error) {
-        console.error("Error during user registration:", error);
-        res.status(500).json({ success: false, message: "Server error" });
-    }
-});
-
-// Endpoint for user login
-app.post('/login', async (req, res) => {
-    try {
-        let user = await Users.findOne({ email: req.body.email });
-        if (user) {
-            const passCompare = req.body.password === user.password;
-            if (passCompare) {
-                const data = {
-                    user: {
-                        id: user.id
-                    }
-                };
-                const token = jwt.sign(data, 'secret_ecom');
-                res.json({ success: true, token });
-            } else {
-                res.status(400).json({ success: false, errors: "Wrong Password" });
-            }
-        } else {
-            res.status(400).json({ success: false, errors: "Wrong Email Id" });
-        }
-    } catch (error) {
-        console.error("Error during login:", error);
-        res.status(500).json({ success: false, message: "Server error" });
-    }
-});
-
-// Endpoint for fetching new collections products
-app.get('/newcollection', async (req, res) => {
-    let products = await Product.find({});
-    let newcollection = products.slice(1).slice(-8);
-    console.log("NewCollection Fetched");
-    res.send(newcollection);
-});
-
-
-// Server startup
-app.listen(port, (error) => {
-    if (!error) {
-        console.log("Server Running on Port " + port);
-    } else {
-        console.log("Error: " + error);
-    }
+// Start the server
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
